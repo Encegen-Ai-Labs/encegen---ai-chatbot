@@ -1,0 +1,28 @@
+# ── Environment variables (NEVER commit these) ──
+.env
+.env.local
+.env.production
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# ── Node / Frontend ──
+node_modules/
+dist/
+.vite/
+
+# ── Database ──
+*.db
+*.sqlite
+
+# ── OS files ──
+.DS_Store
+Thumbs.db
+
+# ── IDE ──
+.vscode/
+.idea/

@@ -1,0 +1,321 @@
+# 🤖 Enci — AI Chatbot Widget
+### by Encegen AI Labs Pvt Ltd
+
+> **Enci** is a fully-featured AI-powered chatbot widget built with React + FastAPI.  
+> It floats in the bottom-right corner of any website and handles lead capture, meeting scheduling, and AI-powered conversations — all powered by Groq (LLaMA 3).
+
+---
+
+## 📁 Project Structure
+
+```
+encegen-project/
+│
+├── backend/                        ← Python FastAPI server
+│   ├── main.py                     ← API routes: /api/chat, /api/leads, /api/bookings
+│   ├── database.py                 ← SQLite database (leads + bookings)
+│   ├── email_service.py            ← Email notifications via GoDaddy SMTP
+│   ├── requirements.txt            ← Python dependencies
+│   └── .env.example                ← Environment variable template
+│
+├── frontend/                       ← React chatbot widget
+│   ├── public/
+│   │   └── Encegen_logo.jpg        ← ⬅ Your company logo (place here)
+│   ├── src/
+│   │   ├── components/
+│   │   │   └── EncegenChatWidget.jsx   ← Main widget (all UI + logic)
+│   │   ├── lib/
+│   │   │   └── api.js              ← Backend API client
+│   │   ├── App.jsx                 ← Mounts the widget
+│   │   ├── main.jsx
+│   │   └── index.css
+│   ├── index.html
+│   ├── package.json
+│   └── vite.config.js
+│
+├── README.md                       ← This file
+├── INTEGRATION.md                  ← Embedding guide
+└── EMAIL_SETUP.md                  ← Email configuration guide
+```
+
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---|---|
+| 🤖 **AI Chat** | Powered by Groq (LLaMA 3.1-8B) — fast, accurate responses |
+| 📋 **Lead Capture** | Automatically detects and saves qualified leads |
+| 📅 **Meeting Scheduler** | 3-step booking flow with calendar + time slots |
+| 📧 **Email Notifications** | Instant email alerts for new leads and bookings |
+| 💬 **Suggestion Chips** | Smart follow-up question buttons after each response |
+| 🕐 **Chat History** | Saves and restores previous conversations |
+| 😊 **Emoji Picker** | Built-in emoji support in the message input |
+| 📱 **Fully Responsive** | Works on desktop and mobile browsers |
+| 🎨 **Animations** | Float, blink, ripple, spring — professional UI |
+| 🛡️ **Strict Lead Validation** | Only saves leads with name + phone/email |
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+| Tool | Version |
+|---|---|
+| Python | 3.9 or higher |
+| Node.js | 18 or higher |
+| npm | 8 or higher |
+
+---
+
+### Step 1 — Get a Groq API Key
+
+1. Go to https://console.groq.com
+2. Sign up / log in
+3. Click **API Keys** → **Create API Key**
+4. Copy the key — you will need it in Step 2
+
+---
+
+### Step 2 — Set up the Backend
+
+```bash
+# Navigate to backend folder
+cd encegen-project/backend
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Create your .env file from the example
+cp .env.example .env
+```
+
+Now open `.env` and fill in your values:
+
+```env
+# Required — your Groq API key
+GROQ_API_KEY=gsk_your_groq_api_key_here
+
+# Email notifications (GoDaddy SMTP)
+GODADDY_USER=noreply@encegenailabs.com
+GODADDY_PASS=YourGoDaddyEmailPassword
+GODADDY_TO=sales@encegenailabs.com
+```
+
+Start the backend server:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Backend is running at http://localhost:8000
+
+---
+
+### Step 3 — Set up the Frontend
+
+```bash
+# Navigate to frontend folder
+cd encegen-project/frontend
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+Frontend is running at http://localhost:5173
+
+Open your browser — you will see the floating chatbot button in the bottom-right corner.
+
+---
+
+### Step 4 — Add Your Company Logo
+
+Place your logo file here:
+```
+frontend/public/Encegen_logo.jpg
+```
+
+> The filename must be exactly `Encegen_logo.jpg` (capital E).
+> The logo appears in the main header as a rounded square icon.
+
+---
+
+## 🔧 Environment Variables
+
+### Backend — `backend/.env`
+
+| Variable | Required | Description |
+|---|---|---|
+| `GROQ_API_KEY` | Yes | Your Groq API key from console.groq.com |
+| `GODADDY_USER` | Optional | GoDaddy SMTP sender email |
+| `GODADDY_PASS` | Optional | GoDaddy email password |
+| `GODADDY_TO` | Optional | Email address to receive notifications |
+
+### Frontend — `frontend/.env` (create if needed)
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_API_URL` | Only if backend is on a different domain | e.g. https://api.yourdomain.com |
+
+---
+
+## 🏗️ Build for Production
+
+### Build the frontend
+
+```bash
+cd frontend
+npm run build
+```
+
+This creates a `frontend/dist/` folder with compiled files.
+
+### Run the backend in production
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+```
+
+### Embed in your existing website
+
+After building, copy the `dist/assets/` files to your server and add to your HTML:
+
+```html
+<!-- Just before </body> -->
+<div id="enci-root"></div>
+<link  rel="stylesheet" href="/assets/index-[hash].css" />
+<script type="module"   src="/assets/index-[hash].js"></script>
+```
+
+Replace `[hash]` with the actual filename shown after running `npm run build`.
+
+---
+
+## 🌐 API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | /api/chat | Send a message, get AI response |
+| POST | /api/leads | Save a qualified lead |
+| GET | /api/leads | List all leads |
+| POST | /api/bookings | Create a meeting booking |
+| GET | /api/bookings | List all bookings |
+| GET | /admin | Admin dashboard |
+| GET | /api/stats | Lead and booking statistics |
+
+---
+
+## 🤖 Chatbot Behaviour
+
+### Conversation Flow (3-4 steps)
+
+```
+Step 1 → Greet and understand the user's need
+Step 2 → Clarify with one focused question
+Step 3 → Collect contact details (name + phone/email)
+Step 4 → Suggest booking a free Discovery Meeting
+```
+
+### Special Responses
+
+| Situation | Enci's Response |
+|---|---|
+| Off-topic (weather, news) | "I'm Enci, Encegen AI Labs' dedicated AI Assistant. I'm not able to help with that..." |
+| Incomplete message | "I'm sorry, I didn't quite understand that. Would you like help with AI Solutions or Services?" |
+| Sensitive info requested | "I cannot provide that information. Please contact sales@encegenailabs.com" |
+
+### Lead Validation Rules
+
+A lead is only saved when ALL of these are true:
+
+- User has sent at least 4 messages
+- User has shared their full name
+- User has shared a phone number (10 digits) or email address
+- User has shown genuine interest in a specific service
+
+---
+
+## 🎨 Customisation
+
+### Change brand colors
+
+Open `EncegenChatWidget.jsx` and edit the `C` object at the top:
+
+```js
+const C = {
+  accent:    "#6C2FFF",   // Main purple — change to your brand color
+  accentSub: "#00C8FF",   // Cyan accent
+  // ...
+};
+```
+
+### Change company info
+
+Edit the `CO` object in `EncegenChatWidget.jsx`:
+
+```js
+const CO = {
+  email:   "sales@encegenailabs.com",
+  website: "https://encegen.in",
+  phone1:  { name: "Navneet Acharya", num: "7030555120" },
+  // ...
+};
+```
+
+### Change the AI system prompt
+
+Edit `SYSTEM_PROMPT` in `backend/main.py` to change Enci's personality and responses.
+
+---
+
+## 📧 Email Setup
+
+The chatbot sends email notifications when:
+- A new lead is captured from a conversation
+- A meeting booking is confirmed
+
+See `EMAIL_SETUP.md` for full GoDaddy SMTP configuration instructions.
+
+---
+
+## 🛡️ Production Checklist
+
+- [ ] Set GROQ_API_KEY in backend/.env
+- [ ] Set GODADDY_USER, GODADDY_PASS, GODADDY_TO for email alerts
+- [ ] Place Encegen_logo.jpg in frontend/public/
+- [ ] Set VITE_API_URL if backend is on a different domain
+- [ ] Run backend behind nginx or caddy with HTTPS
+- [ ] Update allow_origins in backend/main.py to your domain
+- [ ] Run npm run build and deploy dist/ to your web server
+
+---
+
+## 🗂️ Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, Vite 5 |
+| Backend | Python 3.11, FastAPI, Uvicorn |
+| AI Model | Groq — LLaMA 3.1-8B-Instant |
+| Database | SQLite (via aiosqlite) |
+| Email | GoDaddy SMTP (aiosmtplib) |
+| Styling | Pure inline styles + CSS keyframes |
+
+---
+
+## 📞 Support
+
+**Encegen AI Labs Pvt Ltd**
+Email:   sales@encegenailabs.com
+Phone:   +91 7030555120 (Navneet — Business Development)
+Phone:   +91 7030555126 (Saurabh — MD & Founder)
+Website: https://encegen.in
+Address: BA Hub, Office No.3, Baif Road, Wagholi, Pune - 412207
+
+---
+
+Enci by Encegen AI Labs · Powered by Groq

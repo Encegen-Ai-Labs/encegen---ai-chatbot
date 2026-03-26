@@ -1,0 +1,2 @@
+/* Encegen Chat Widget — global resets only */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
