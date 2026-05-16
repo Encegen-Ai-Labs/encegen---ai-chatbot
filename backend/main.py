@@ -1,19 +1,6 @@
 """
 main.py — Encegen AI Labs Lead Management API (FastAPI)
-
-Endpoints:
-  POST   /api/chat            proxy to OpenAI (chat + lead extraction)
-  POST   /api/leads           create a lead
-  GET    /api/leads           list leads  (?status= &search= &page= &limit=)
-  GET    /api/leads/recent    last N leads for notification feed
-  GET    /api/leads/{id}      single lead + transcript
-  PATCH  /api/leads/{id}      update status / notes
-  DELETE /api/leads/{id}      delete a lead
-  GET    /api/stats           counts by status + today
-
-Run:
-  python main.py
-  or: uvicorn main:app --reload --port 8000
+MySQL Version using aiomysql
 """
 
 import asyncio
@@ -23,7 +10,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-import aiosqlite
+import aiomysql
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -33,57 +20,58 @@ from pydantic import BaseModel
 from database import get_db, init_db
 from email_service import send_lead_notification, send_booking_notification
 
-# Always load .env from the same directory as main.py — works regardless of where
-# the server is launched from (e.g. python backend/main.py from project root)
+# ============================================================
+# ENV + LOGGING
+# ============================================================
+
 _ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 load_dotenv(dotenv_path=_ENV_PATH, override=True)
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-API_KEY      = GROQ_API_KEY
-CHAT_URL     = "https://api.groq.com/openai/v1/chat/completions"
-CHAT_MODEL   = os.getenv("CHAT_MODEL", "llama-3.1-8b-instant")
+API_KEY = GROQ_API_KEY
 
-# ── Lifespan ──────────────────────────────────────────────────────
+CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+CHAT_MODEL = os.getenv("CHAT_MODEL", "llama-3.1-8b-instant")
+
+# ============================================================
+# APP LIFESPAN
+# ============================================================
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    logger.info(f"✅  Encegen Lead API  →  http://localhost:{os.getenv('PORT', 8000)}")
-    logger.info(f"   .env loaded from   →  {_ENV_PATH}")
-    logger.info(f"   .env exists        →  {os.path.exists(_ENV_PATH)}")
-    logger.info(f"   Groq key           →  {'SET ✓  (starts: ' + API_KEY[:8] + '...)' if API_KEY else 'MISSING ✗  →  set GROQ_API_KEY in ' + _ENV_PATH}")
-    logger.info(f"   Model              →  {CHAT_MODEL}")
 
-    _gd_user = os.getenv("GODADDY_USER", "").strip()
-    _gd_pass = os.getenv("GODADDY_PASS", "").strip()
-    if _gd_user and _gd_pass:
-        logger.info(f"   Email (GoDaddy)    →  SET ✓  ({_gd_user})  — notifications → sales@encegenailabs.com")
-    else:
-        logger.error(
-            "🚨  EMAIL NOT CONFIGURED — lead/booking notifications will NOT be sent!\n"
-            f"   Fix: open {_ENV_PATH} and set:\n"
-            "        GODADDY_USER=sales@encegenailabs.com\n"
-            "        GODADDY_PASS=Summer@123\n"
-            "   (Use your actual GoDaddy Workspace Email password — no App Password needed)"
-        )
+    logger.info(f"✅ Encegen Lead API running")
+    logger.info(f"✅ ENV loaded from {_ENV_PATH}")
 
     if not API_KEY:
-        logger.error("🚨  GROQ_API_KEY is empty — chatbot will not work until you set it in .env and restart!")
+        logger.error("❌ GROQ_API_KEY missing")
+
     yield
 
-app = FastAPI(title="Encegen AI Labs — Lead API", version="2.0.0", lifespan=lifespan)
+# ============================================================
+# FASTAPI APP
+# ============================================================
+
+app = FastAPI(
+    title="Encegen AI Labs — Lead API",
+    version="3.0.0",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # restrict to your domain in production
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ================================================================
-# Pydantic schemas
-# ================================================================
+# ============================================================
+# SCHEMAS
+# ============================================================
 
 class ChatMessage(BaseModel):
     role: str
@@ -96,41 +84,41 @@ class ChatRequest(BaseModel):
     max_tokens: Optional[int] = 3000
 
 class LeadCreate(BaseModel):
-    name:         Optional[str] = None
-    email:        Optional[str] = None
-    phone:        Optional[str] = None
-    company:      Optional[str] = None
-    industry:     Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    industry: Optional[str] = None
     requirements: Optional[str] = None
-    services:     Optional[str | list] = None
+    services: Optional[str | list] = None
     budget_range: Optional[str] = None
-    timeline:     Optional[str] = None
-    source:       Optional[str] = "chatbot"
-    transcript:   Optional[list | str] = None
+    timeline: Optional[str] = None
+    source: Optional[str] = "chatbot"
+    transcript: Optional[list | str] = None
 
 class LeadUpdate(BaseModel):
-    status:  Optional[str] = None
-    notes:   Optional[str] = None
-    name:    Optional[str] = None
-    email:   Optional[str] = None
-    phone:   Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
     company: Optional[str] = None
 
 class BookingCreate(BaseModel):
-    name:         str
-    email:        Optional[str] = None
-    phone:        Optional[str] = None
-    project:      Optional[str] = None
-    budget:       Optional[str] = None
-    deadline:     Optional[str] = None
-    date:         str          # YYYY-MM-DD
-    time:         str          # HH:MM (24h)
-    date_label:   Optional[str] = None
-    time_label:   Optional[str] = None
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    project: Optional[str] = None
+    budget: Optional[str] = None
+    deadline: Optional[str] = None
+    date: str
+    time: str
+    date_label: Optional[str] = None
+    time_label: Optional[str] = None
 
-# ================================================================
-# /api/chat  — OpenAI proxy
-# ================================================================
+# ============================================================
+# SYSTEM PROMPT
+# ============================================================
 
 SYSTEM_PROMPT = """You are "Enci" — the official intelligent AI assistant for Encegen AI Labs Pvt Ltd.
 Represent the company with warmth, confidence, deep expertise, and professionalism at all times.
@@ -191,7 +179,7 @@ FORBIDDEN TOPICS — YOU MUST REFUSE ALL OF THESE, NO EXCEPTIONS:
 
 WHEN A FORBIDDEN TOPIC IS ASKED — respond with EXACTLY this, word for word:
 
-"I'm Enci, Encegen AI Labs' dedicated AI Assistant. I'm not able to help with that, but I'm here to assist you with our AI solutions, software services, and company information. How can I help you today? 😊
+"I'm Enci, Encegen AI Labs' dedicated AI Assistant. I'm not able to help with that, but I'm here to assist you with our AI solutions, software services, and company information. How can I help you today%s 😊
 
 CHIPS:["What AI solutions does Encegen offer?","Tell me about your software services","How do I schedule a discovery call?","What industries does Encegen serve?"]"
 
@@ -311,257 +299,613 @@ If ANY condition is NOT met, respond ONLY with: {"is_lead":false}
 DO NOT mark as lead if user is just browsing, asking general questions, or has not shared name + contact.
 Services: AI/ML, Custom Software, Web/E-Commerce, Digital Marketing, AI Chatbot, Computer Vision, NLP, Other."""
 
+# ============================================================
+# HELPERS
+# ============================================================
 
-@app.post("/api/chat")
-async def chat_proxy(req: ChatRequest):
-    """
-    Proxies chat to Groq (or OpenAI fallback), keeping the API key server-side.
-    Groq is OpenAI-compatible — same payload format, same response shape.
-    """
-    if not API_KEY:
-        raise HTTPException(status_code=503, detail="No API key configured. Set GROQ_API_KEY in backend/.env")
-
-    system = req.system or SYSTEM_PROMPT
-    model  = req.model  or CHAT_MODEL
-
-    # Keep last 10 messages to avoid token limit errors in long conversations
-    trimmed = req.messages[-10:] if len(req.messages) > 10 else req.messages
-
-    payload = {
-        "model":      model,
-        "max_tokens": min(req.max_tokens or 1200, 1200),
-        "temperature": 0.5,
-        "messages": [
-            {"role": "system", "content": system},
-            *[{"role": m.role, "content": m.content} for m in trimmed],
-        ],
-    }
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            res = await client.post(
-                CHAT_URL,
-                json=payload,
-                headers={"Authorization": f"Bearer {API_KEY}"},
-            )
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail="API request timed out.")
-        except httpx.RequestError as exc:
-            raise HTTPException(status_code=502, detail=f"API connection error: {exc}")
-
-    if not res.is_success:
-        detail = res.json().get("error", {}).get("message", f"API error {res.status_code}")
-        raise HTTPException(status_code=res.status_code, detail=detail)
-
-    data    = res.json()
-    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    return {"content": content, "model": data.get("model", model)}
-
-
-# ================================================================
-# /api/leads
-# ================================================================
-
-def _row_to_dict(row: aiosqlite.Row) -> dict:
+def _row_to_dict(row) -> dict:
     d = dict(row)
+
     if d.get("transcript"):
         try:
             d["transcript"] = json.loads(d["transcript"])
         except Exception:
             pass
+
     return d
+
 
 def _normalise_services(services) -> Optional[str]:
     if services is None:
         return None
+
     if isinstance(services, list):
         return ", ".join(s for s in services if s)
+
     return services
 
+# ============================================================
+# CHAT ENDPOINT
+# ============================================================
 
-# ================================================================
-# /api/booking  — Consultation booking → email both addresses
-# ================================================================
+@app.post("/api/chat")
+async def chat_proxy(req: ChatRequest):
+
+    if not API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="GROQ_API_KEY missing"
+        )
+
+    system = req.system or SYSTEM_PROMPT
+    model = req.model or CHAT_MODEL
+
+    trimmed = req.messages[-10:] if len(req.messages) > 10 else req.messages
+
+    payload = {
+        "model": model,
+        "max_tokens": min(req.max_tokens or 1200, 1200),
+        "temperature": 0.5,
+        "messages": [
+            {"role": "system", "content": system},
+            *[
+                {"role": m.role, "content": m.content}
+                for m in trimmed
+            ]
+        ]
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+
+        try:
+            res = await client.post(
+                CHAT_URL,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {API_KEY}"
+                }
+            )
+
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status_code=504,
+                detail="API timeout"
+            )
+
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=str(exc)
+            )
+        if not res.is_success:
+            raise HTTPException(
+                status_code=res.status_code,
+                detail=res.text
+            )
+
+        data = res.json()
+
+        content = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+
+    
+        # ============================================================
+    # AUTO LEAD EXTRACTION
+    # ============================================================
+
+    try:
+        conversation_text = "\n".join(
+            [f"{m.role}: {m.content}" for m in trimmed]
+        )
+
+        extract_payload = {
+            "model": model,
+            "temperature": 0,
+            "max_tokens": 300,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": LEAD_EXTRACT_PROMPT
+                },
+                {
+                    "role": "user",
+                    "content": conversation_text
+                }
+            ]
+        }
+
+        extract_res = await client.post(
+            CHAT_URL,
+            json=extract_payload,
+            headers={"Authorization": f"Bearer {API_KEY}"}
+        )
+
+        if extract_res.is_success:
+
+            extract_data = extract_res.json()
+
+            extract_content = (
+                extract_data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+
+            try:
+                lead_json = json.loads(extract_content)
+
+                if lead_json.get("is_lead"):
+
+                    services_str = _normalise_services(
+                        lead_json.get("services")
+                    )
+
+                    async with get_db() as db:
+                        async with db.cursor() as cur:
+
+                            await cur.execute(
+                                """
+                                INSERT INTO leads
+                                (
+                                    name,
+                                    email,
+                                    phone,
+                                    company,
+                                    industry,
+                                    requirements,
+                                    services,
+                                    budget_range,
+                                    timeline,
+                                    source,
+                                    transcript
+                                )
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                """,
+                                (
+                                    lead_json.get("name"),
+                                    lead_json.get("email"),
+                                    lead_json.get("phone"),
+                                    lead_json.get("company"),
+                                    lead_json.get("industry"),
+                                    lead_json.get("requirements"),
+                                    services_str,
+                                    lead_json.get("budget_range"),
+                                    lead_json.get("timeline"),
+                                    "chatbot",
+                                    json.dumps([
+                                        {
+                                            "role": m.role,
+                                            "content": m.content
+                                        }
+                                        for m in trimmed
+                                    ])
+                                )
+                            )
+
+                            logger.info(
+                                f"✅ Lead auto-saved: "
+                                f"{lead_json.get('name')}"
+                            )
+
+            except Exception as parse_exc:
+                logger.error(f"Lead parsing failed: {parse_exc}")
+
+    except Exception as lead_exc:
+        logger.error(f"Lead extraction failed: {lead_exc}")
+    return {
+        "content": content,
+        "model": data.get("model", model)
+    }
+
+# ============================================================
+# CREATE BOOKING
+# ============================================================
 
 @app.post("/api/booking", status_code=201)
 async def create_booking(booking: BookingCreate):
-    """
-    Saves booking to DB (always succeeds) then attempts to email the team.
-    Email failure does NOT cause a 500 — booking is always saved.
-    """
+
     new_id = None
-    db_error = None
+
     try:
+
         async with get_db() as db:
-            cursor = await db.execute(
-                """INSERT INTO leads
-                   (name, email, phone, requirements, budget_range, services, source, transcript)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (
-                    booking.name,
-                    booking.email,
-                    booking.phone,
-                    f"Consultation booking for {booking.date_label or booking.date} at "
-                    f"{booking.time_label or booking.time}. Project: {booking.project or 'Not specified'}. "
-                    f"Budget: {booking.budget or 'Not specified'}. Deadline: {booking.deadline or 'Not specified'}",
-                    booking.budget or None,
-                    "Consultation Booking",
-                    "booking-form",
-                    None,
-                ),
-            )
-            new_id = cursor.lastrowid
-        logger.info(f"✅  Booking saved → DB id={new_id} ({booking.name})")
+            async with db.cursor() as cur:
+
+                await cur.execute(
+                    """
+                    INSERT INTO leads
+                    (
+                        name,
+                        email,
+                        phone,
+                        requirements,
+                        budget_range,
+                        services,
+                        source,
+                        transcript
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        booking.name,
+                        booking.email,
+                        booking.phone,
+                        booking.project,
+                        booking.budget,
+                        "Consultation Booking",
+                        "booking-form",
+                        None
+                    )
+                )
+
+                new_id = cur.lastrowid
+
     except Exception as exc:
-        db_error = str(exc)
-        logger.error(f"DB insert failed for booking: {exc}")
-        # Still try to send email even if DB failed
+        logger.error(f"Booking insert failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
     booking_data = {
-        "id":      new_id or 0,
-        "name":    booking.name,
-        "email":   booking.email   or "",
-        "phone":   booking.phone   or "",
-        "date":    booking.date_label or booking.date,
-        "time":    booking.time_label or booking.time,
-        "project": booking.project or "Not specified",
-        "budget":  booking.budget   or "Not specified",
-        "deadline": booking.deadline or "Not specified",
+        "id": new_id,
+        "name": booking.name,
+        "email": booking.email,
+        "phone": booking.phone,
+        "project": booking.project,
+        "budget": booking.budget,
+        "deadline": booking.deadline,
+        "date": booking.date,
+        "time": booking.time,
     }
 
-    # Send email — errors are caught inside send_booking_notification, never raise
     asyncio.create_task(send_booking_notification(booking_data))
 
     return {
-        "ok":      True,
-        "id":      new_id,
-        "message": "Booking received. Email notification dispatched to team.",
-        **({"db_warning": db_error} if db_error else {}),
+        "ok": True,
+        "id": new_id
     }
 
+# ============================================================
+# CREATE LEAD
+# ============================================================
 
 @app.post("/api/leads", status_code=201)
 async def create_lead(lead: LeadCreate):
-    services_str  = _normalise_services(lead.services)
-    transcript_str = json.dumps(lead.transcript) if lead.transcript else None
+
+    services_str = _normalise_services(lead.services)
+
+    transcript_str = (
+        json.dumps(lead.transcript)
+        if lead.transcript else None
+    )
 
     async with get_db() as db:
-        cursor = await db.execute(
-            """INSERT INTO leads
-               (name, email, phone, company, industry, requirements,
-                services, budget_range, timeline, source, transcript)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (lead.name, lead.email, lead.phone, lead.company, lead.industry,
-             lead.requirements, services_str, lead.budget_range, lead.timeline,
-             lead.source or "chatbot", transcript_str),
-        )
-        new_id = cursor.lastrowid
+        async with db.cursor(aiomysql.DictCursor) as cur:
 
-        row = await db.execute_fetchall("SELECT * FROM leads WHERE id = ?", (new_id,))
-        new_lead = _row_to_dict(row[0]) if row else {"id": new_id}
+            await cur.execute(
+                """
+                INSERT INTO leads
+                (
+                    name,
+                    email,
+                    phone,
+                    company,
+                    industry,
+                    requirements,
+                    services,
+                    budget_range,
+                    timeline,
+                    source,
+                    transcript
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    lead.name,
+                    lead.email,
+                    lead.phone,
+                    lead.company,
+                    lead.industry,
+                    lead.requirements,
+                    services_str,
+                    lead.budget_range,
+                    lead.timeline,
+                    lead.source or "chatbot",
+                    transcript_str
+                )
+            )
 
-    # Fire-and-forget email
+            new_id = cur.lastrowid
+
+            await cur.execute(
+                "SELECT * FROM leads WHERE id = %s",
+                (new_id,)
+            )
+
+            row = await cur.fetchone()
+
+    new_lead = _row_to_dict(row) if row else {"id": new_id}
+
     asyncio.create_task(send_lead_notification(new_lead))
 
-    return {"ok": True, "id": new_id}
+    return {
+        "ok": True,
+        "id": new_id
+    }
 
+# ============================================================
+# RECENT LEADS
+# ============================================================
 
 @app.get("/api/leads/recent")
 async def recent_leads(limit: int = Query(default=20, le=50)):
-    async with get_db() as db:
-        rows = await db.execute_fetchall(
-            "SELECT id,name,phone,company,requirements,services,status,created_at "
-            "FROM leads ORDER BY id DESC LIMIT ?",
-            (limit,),
-        )
-    return {"ok": True, "leads": [dict(r) for r in rows]}
 
+    async with get_db() as db:
+        async with db.cursor(aiomysql.DictCursor) as cur:
+
+            await cur.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    phone,
+                    company,
+                    requirements,
+                    services,
+                    status,
+                    created_at
+                FROM leads
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (limit,)
+            )
+
+            rows = await cur.fetchall()
+
+    return {
+        "ok": True,
+        "leads": rows
+    }
+
+# ============================================================
+# LIST LEADS
+# ============================================================
 
 @app.get("/api/leads")
 async def list_leads(
     status: Optional[str] = None,
     search: Optional[str] = None,
-    page:   int = Query(default=1, ge=1),
-    limit:  int = Query(default=50, le=200),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, le=200),
 ):
+
     offset = (page - 1) * limit
-    where, params = ["1=1"], []
+
+    where = ["1=1"]
+    params = []
 
     if status and status != "all":
-        where.append("status = ?"); params.append(status)
+        where.append("status = %s")
+        params.append(status)
+
     if search:
-        where.append("(name LIKE ? OR email LIKE ? OR phone LIKE ? OR company LIKE ? OR requirements LIKE ?)")
-        q = f"%{search}%"; params += [q, q, q, q, q]
+        where.append(
+            """
+            (
+                name LIKE %s OR
+                email LIKE %s OR
+                phone LIKE %s OR
+                company LIKE %s OR
+                requirements LIKE %s
+            )
+            """
+        )
+
+        q = f"%{search}%"
+
+        params += [q, q, q, q, q]
 
     clause = " AND ".join(where)
-    async with get_db() as db:
-        rows  = await db.execute_fetchall(
-            f"SELECT id,name,email,phone,company,industry,requirements,services,"
-            f"budget_range,timeline,source,status,notes,created_at,updated_at "
-            f"FROM leads WHERE {clause} ORDER BY id DESC LIMIT ? OFFSET ?",
-            (*params, limit, offset),
-        )
-        count = await db.execute_fetchall(
-            f"SELECT COUNT(*) as c FROM leads WHERE {clause}", params
-        )
-    total = count[0]["c"] if count else 0
-    return {"ok": True, "leads": [dict(r) for r in rows], "total": total, "page": page, "limit": limit}
 
+    async with get_db() as db:
+        async with db.cursor(aiomysql.DictCursor) as cur:
+
+            await cur.execute(
+                f"""
+                SELECT
+                    id,
+                    name,
+                    email,
+                    phone,
+                    company,
+                    industry,
+                    requirements,
+                    services,
+                    budget_range,
+                    timeline,
+                    source,
+                    status,
+                    notes,
+                    created_at,
+                    updated_at
+                FROM leads
+                WHERE {clause}
+                ORDER BY id DESC
+                LIMIT %s OFFSET %s
+                """,
+                (*params, limit, offset)
+            )
+
+            rows = await cur.fetchall()
+
+            await cur.execute(
+                f"""
+                SELECT COUNT(*) as c
+                FROM leads
+                WHERE {clause}
+                """,
+                params
+            )
+
+            count = await cur.fetchone()
+
+    return {
+        "ok": True,
+        "leads": rows,
+        "total": count["c"] if count else 0,
+        "page": page,
+        "limit": limit
+    }
+
+# ============================================================
+# GET SINGLE LEAD
+# ============================================================
 
 @app.get("/api/leads/{lead_id}")
 async def get_lead(lead_id: int):
-    async with get_db() as db:
-        rows = await db.execute_fetchall("SELECT * FROM leads WHERE id = ?", (lead_id,))
-    if not rows:
-        raise HTTPException(status_code=404, detail="Lead not found")
-    return {"ok": True, "lead": _row_to_dict(rows[0])}
 
+    async with get_db() as db:
+        async with db.cursor(aiomysql.DictCursor) as cur:
+
+            await cur.execute(
+                "SELECT * FROM leads WHERE id = %s",
+                (lead_id,)
+            )
+
+            row = await cur.fetchone()
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="Lead not found"
+        )
+
+    return {
+        "ok": True,
+        "lead": _row_to_dict(row)
+    }
+
+# ============================================================
+# UPDATE LEAD
+# ============================================================
 
 @app.patch("/api/leads/{lead_id}")
-async def update_lead(lead_id: int, update: LeadUpdate):
-    allowed = {k: v for k, v in update.model_dump().items() if v is not None}
+async def update_lead(
+    lead_id: int,
+    update: LeadUpdate
+):
+
+    allowed = {
+        k: v
+        for k, v in update.model_dump().items()
+        if v is not None
+    }
+
     if not allowed:
         return {"ok": True}
 
-    set_clause = ", ".join(f"{k} = ?" for k in allowed)
-    set_clause += ", updated_at = datetime('now','localtime')"
-    values = list(allowed.values()) + [lead_id]
+    set_clause = ", ".join(
+        f"{k} = %s"
+        for k in allowed
+    )
+
+    values = list(allowed.values())
+    values.append(lead_id)
 
     async with get_db() as db:
-        await db.execute(f"UPDATE leads SET {set_clause} WHERE id = ?", values)
+        async with db.cursor() as cur:
+
+            await cur.execute(
+                f"""
+                UPDATE leads
+                SET {set_clause},
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                values
+            )
+
     return {"ok": True}
 
+# ============================================================
+# DELETE LEAD
+# ============================================================
 
 @app.delete("/api/leads/{lead_id}")
 async def delete_lead(lead_id: int):
+
     async with get_db() as db:
-        await db.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
+        async with db.cursor() as cur:
+
+            await cur.execute(
+                "DELETE FROM leads WHERE id = %s",
+                (lead_id,)
+            )
+
     return {"ok": True}
 
+# ============================================================
+# STATS
+# ============================================================
 
 @app.get("/api/stats")
 async def get_stats():
+
     async with get_db() as db:
-        by_status = await db.execute_fetchall(
-            "SELECT status, COUNT(*) as count FROM leads GROUP BY status"
-        )
-        total_row = await db.execute_fetchall("SELECT COUNT(*) as c FROM leads")
-        today_row = await db.execute_fetchall(
-            "SELECT COUNT(*) as c FROM leads WHERE date(created_at)=date('now','localtime')"
-        )
-    status_map = {r["status"]: r["count"] for r in by_status}
-    return {
-        "ok":       True,
-        "total":    total_row[0]["c"] if total_row else 0,
-        "today":    today_row[0]["c"] if today_row else 0,
-        "byStatus": status_map,
+        async with db.cursor(aiomysql.DictCursor) as cur:
+
+            await cur.execute(
+                """
+                SELECT status, COUNT(*) as count
+                FROM leads
+                GROUP BY status
+                """
+            )
+
+            by_status = await cur.fetchall()
+
+            await cur.execute(
+                "SELECT COUNT(*) as c FROM leads"
+            )
+
+            total_row = await cur.fetchone()
+
+            await cur.execute(
+                """
+                SELECT COUNT(*) as c
+                FROM leads
+                WHERE DATE(created_at)=CURDATE()
+                """
+            )
+
+            today_row = await cur.fetchone()
+
+    status_map = {
+        r["status"]: r["count"]
+        for r in by_status
     }
 
+    return {
+        "ok": True,
+        "total": total_row["c"] if total_row else 0,
+        "today": today_row["c"] if today_row else 0,
+        "byStatus": status_map
+    }
 
-# ================================================================
-# Dev runner
-# ================================================================
+# ============================================================
+# DEV RUNNER
+# ============================================================
+
 if __name__ == "__main__":
+
     import uvicorn
+
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=True
+    )

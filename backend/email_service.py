@@ -37,6 +37,7 @@ If you don't want to create a separate noreply@ address:
   (self-send — slightly higher spam risk but works for internal alerts)
 """
 
+from email import message
 import os
 import ssl
 import uuid
@@ -46,6 +47,9 @@ from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +65,8 @@ def _godaddy_ssl() -> ssl.SSLContext:
     return ctx
 
 # ── Config ───────────────────────────────────────────────
-GODADDY_HOST  = "smtpout.secureserver.net"
-GODADDY_PORT  = 465
+GODADDY_HOST = "smtp.office365.com"
+GODADDY_PORT  = 587
 
 def _get_config():
     """
@@ -74,8 +78,11 @@ def _get_config():
     smtp_user  = os.getenv("GODADDY_USER", "").strip()
     smtp_pass  = os.getenv("GODADDY_PASS", "").strip()
     recipient  = os.getenv("GODADDY_TO",   smtp_user).strip()  # default = same as sender
+    print("SMTP USER:", smtp_user)
+    print("SMTP PASS EXISTS:", bool(smtp_pass))
+    print("SMTP TO:", recipient)
     return smtp_user, smtp_pass, smtp_user, recipient
-
+    
 
 def _make_msg(subject: str, plain: str, html: str) -> MIMEMultipart:
     """Build a properly-headered multipart email that avoids spam filters."""
@@ -105,27 +112,61 @@ def _make_msg(subject: str, plain: str, html: str) -> MIMEMultipart:
 
 async def _send(msg: MIMEMultipart, label: str):
     """Send via GoDaddy SMTP. Never raises."""
+
     smtp_user, smtp_pass, _, _ = _get_config()
+
     if not smtp_user or not smtp_pass:
         logger.warning(
             "Email not configured. Add GODADDY_USER + GODADDY_PASS to backend/.env"
         )
         return
+
     try:
         import aiosmtplib
+        import traceback
+
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("📨 TRYING TO SEND EMAIL")
+        print("SMTP HOST:", GODADDY_HOST)
+        print("SMTP PORT:", GODADDY_PORT)
+        print("SMTP USER:", smtp_user)
+        print("TO:", msg["To"])
+        print("SUBJECT:", msg["Subject"])
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
         await aiosmtplib.send(
             msg,
             hostname=GODADDY_HOST,
             port=GODADDY_PORT,
-            use_tls=True,
-            tls_context=_godaddy_ssl(),
+            start_tls=True,
+            use_tls=False,
             username=smtp_user,
             password=smtp_pass,
+            timeout=30,
         )
-        logger.info(f"[EMAIL] Sent: {label} -> {msg['To']}")
-    except Exception as exc:
-        logger.error(f"[EMAIL] Failed ({label}): {exc}")
 
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print(f"✅ EMAIL SENT SUCCESSFULLY ({label})")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        logger.info(
+            f"[EMAIL] Sent: {label} -> {msg['To']}"
+        )
+
+    except Exception as exc:
+
+        import traceback
+
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print(f"❌ EMAIL FAILED ({label})")
+        print(f"ERROR: {exc}")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        traceback.print_exc()
+
+        logger.error(
+            f"[EMAIL] Failed ({label}): {exc}"
+        )
 
 # ════════════════════════════════════════════════════════
 # LEAD NOTIFICATION

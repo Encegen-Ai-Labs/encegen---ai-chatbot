@@ -1,58 +1,75 @@
-"""
-database.py — SQLite setup using aiosqlite (async)
-Creates leads.db automatically on first run.
-"""
-
-import aiosqlite
 import os
+import aiomysql
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leads.db")
+load_dotenv()
+
+MYSQL_HOST = os.getenv("MYSQL_HOST")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
+MYSQL_USER = os.getenv("MYSQL_USER")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
+MYSQL_DB = os.getenv("MYSQL_DB")
+
+pool = None
 
 CREATE_LEADS_TABLE = """
 CREATE TABLE IF NOT EXISTS leads (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    name          TEXT,
-    email         TEXT,
-    phone         TEXT,
-    company       TEXT,
-    industry      TEXT,
-    requirements  TEXT,
-    services      TEXT,
-    budget_range  TEXT,
-    timeline      TEXT,
-    source        TEXT    DEFAULT 'chatbot',
-    status        TEXT    DEFAULT 'new',
-    notes         TEXT    DEFAULT '',
-    transcript    TEXT,
-    created_at    TEXT    DEFAULT (datetime('now', 'localtime')),
-    updated_at    TEXT    DEFAULT (datetime('now', 'localtime'))
-);
+    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+
+    name VARCHAR(255),
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    company VARCHAR(255),
+    industry VARCHAR(255),
+
+    requirements TEXT,
+    services TEXT,
+
+    budget_range VARCHAR(255),
+    timeline VARCHAR(255),
+
+    source VARCHAR(100) DEFAULT 'chatbot',
+    status VARCHAR(100) DEFAULT 'new',
+
+    notes TEXT,
+
+    transcript LONGTEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+)
 """
+
+async def init_db():
+    global pool
+
+    pool = await aiomysql.create_pool(
+        host=MYSQL_HOST,
+        port=MYSQL_PORT,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        db=MYSQL_DB,
+        autocommit=False,
+        minsize=1,
+        maxsize=10,
+    )
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(CREATE_LEADS_TABLE)
+        await conn.commit()
+
+    print("✅ MySQL database initialized")
+
 
 @asynccontextmanager
 async def get_db():
-    """
-    Async context manager — always use as:
-        async with get_db() as db:
-            ...
-    Automatically commits on success, rolls back on error, closes on exit.
-    """
-    db = await aiosqlite.connect(DB_PATH)
-    db.row_factory = aiosqlite.Row
-    try:
-        yield db
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-    finally:
-        await db.close()
-
-async def init_db():
-    """Called once at startup to create the schema."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("PRAGMA journal_mode=WAL;")
-        await db.execute(CREATE_LEADS_TABLE)
-        await db.commit()
-    print(f"✅  Database ready → {DB_PATH}")
+    async with pool.acquire() as conn:
+        try:
+            yield conn
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
