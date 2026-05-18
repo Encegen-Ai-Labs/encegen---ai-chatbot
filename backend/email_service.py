@@ -66,7 +66,7 @@ def _godaddy_ssl() -> ssl.SSLContext:
 
 # ── Config ───────────────────────────────────────────────
 GODADDY_HOST = "smtp.office365.com"
-GODADDY_PORT  = 587
+GODADDY_PORT = 587
 
 def _get_config():
     """
@@ -135,15 +135,15 @@ async def _send(msg: MIMEMultipart, label: str):
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         await aiosmtplib.send(
-            msg,
-            hostname=GODADDY_HOST,
-            port=GODADDY_PORT,
-            start_tls=True,
-            use_tls=False,
-            username=smtp_user,
-            password=smtp_pass,
-            timeout=30,
-        )
+              msg,
+              hostname=GODADDY_HOST,
+              port=GODADDY_PORT,
+              start_tls=True,
+              use_tls=False,
+              username=smtp_user,
+              password=smtp_pass,
+              timeout=30,
+          )
 
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print(f"✅ EMAIL SENT SUCCESSFULLY ({label})")
@@ -346,7 +346,158 @@ async def send_lead_notification(lead: dict):
     msg = _make_msg(subject, _lead_plain(lead), _lead_html(lead))
     await _send(msg, f"lead/{name}")
 
+# ════════════════════════════════════════════════════════
+# CLIENT CONFIRMATION EMAIL
+# ════════════════════════════════════════════════════════
 
+def _client_confirmation_plain(lead: dict) -> str:
+
+    name = lead.get("name") or "there"
+
+    return (
+        f"Hi {name},\n\n"
+
+        f"Thank you for contacting Encegen AI Labs.\n\n"
+
+        f"We have received your enquiry successfully. "
+        f"Our team will review your requirements and "
+        f"get back to you shortly.\n\n"
+
+        f"If your request is urgent, you can reply "
+        f"directly to this email.\n\n"
+
+        f"Best regards,\n"
+        f"Encegen AI Labs\n"
+        f"https://encegenailabs.com"
+    )
+
+
+def _client_confirmation_html(lead: dict) -> str:
+
+    name = lead.get("name") or "there"
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family:Arial,sans-serif;background:#f5f5f5;padding:30px;">
+
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <td align="center">
+
+                    <table width="560" cellpadding="0" cellspacing="0"
+                        style="background:white;border-radius:10px;
+                        border:1px solid #e5e5e5;overflow:hidden;">
+
+                        <tr>
+                            <td style="background:#5C35E8;
+                                color:white;
+                                padding:24px;
+                                text-align:center;">
+
+                                <h2 style="margin:0;">
+                                    Encegen AI Labs
+                                </h2>
+
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td style="padding:30px;">
+
+                                <p style="font-size:15px;color:#333;">
+                                    Hi {name},
+                                </p>
+
+                                <p style="font-size:15px;color:#333;line-height:1.7;">
+
+                                    Thank you for contacting
+                                    <strong>Encegen AI Labs</strong>.
+
+                                    <br><br>
+
+                                    We have successfully received your enquiry.
+
+                                    <br><br>
+
+                                    Our team will review your requirements
+                                    and get back to you shortly.
+
+                                </p>
+
+                                <div style="margin-top:30px;">
+
+                                    <a href="https://encegenailabs.com"
+                                        style="
+                                            background:#5C35E8;
+                                            color:white;
+                                            padding:12px 20px;
+                                            text-decoration:none;
+                                            border-radius:6px;
+                                            display:inline-block;
+                                            font-weight:bold;
+                                        ">
+                                        Visit Website
+                                    </a>
+
+                                </div>
+
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td style="
+                                background:#fafafa;
+                                border-top:1px solid #eee;
+                                padding:20px;
+                                text-align:center;
+                                font-size:12px;
+                                color:#777;
+                            ">
+
+                                Encegen AI Labs<br>
+                                https://encegenailabs.com
+
+                            </td>
+                        </tr>
+
+                    </table>
+
+                </td>
+            </tr>
+        </table>
+
+    </body>
+    </html>
+    """
+
+
+async def send_client_confirmation(lead: dict):
+
+    client_email = (lead.get("email") or "").strip()
+
+    if not client_email:
+        logger.warning(
+            "Client confirmation skipped: no email found"
+        )
+        return
+
+    subject = "We Received Your Enquiry - Encegen AI Labs"
+
+    msg = _make_msg(
+        subject,
+        _client_confirmation_plain(lead),
+        _client_confirmation_html(lead)
+    )
+
+    # IMPORTANT:
+    # override recipient from internal sales email
+    msg["To"] = client_email
+
+    await _send(
+        msg,
+        f"client-confirmation/{client_email}"
+    )
 # ════════════════════════════════════════════════════════
 # BOOKING NOTIFICATION
 # ════════════════════════════════════════════════════════

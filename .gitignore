@@ -26,3 +26,6 @@ Thumbs.db
 # ── IDE ──
 .vscode/
 .idea/
+test.py
+leads.db-shm
+leads.db-wal

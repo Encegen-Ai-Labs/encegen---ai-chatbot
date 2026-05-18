@@ -3,6 +3,7 @@ main.py — Encegen AI Labs Lead Management API (FastAPI)
 MySQL Version using aiomysql
 """
 
+from httpx import _content
 import asyncio
 import json
 import logging
@@ -18,7 +19,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from database import get_db, init_db
-from email_service import send_lead_notification, send_booking_notification
+from email_service import (
+    send_lead_notification,
+    send_booking_notification,
+    send_client_confirmation
+)
 
 # ============================================================
 # ENV + LOGGING
@@ -391,114 +396,128 @@ async def chat_proxy(req: ChatRequest):
             .get("content", "")
         )
 
-    
         # ============================================================
-    # AUTO LEAD EXTRACTION
-    # ============================================================
+        # AUTO LEAD EXTRACTION
+        # ============================================================
 
-    try:
-        conversation_text = "\n".join(
-            [f"{m.role}: {m.content}" for m in trimmed]
-        )
+        try:
 
-        extract_payload = {
-            "model": model,
-            "temperature": 0,
-            "max_tokens": 300,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": LEAD_EXTRACT_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": conversation_text
-                }
-            ]
-        }
-
-        extract_res = await client.post(
-            CHAT_URL,
-            json=extract_payload,
-            headers={"Authorization": f"Bearer {API_KEY}"}
-        )
-
-        if extract_res.is_success:
-
-            extract_data = extract_res.json()
-
-            extract_content = (
-                extract_data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
+            conversation_text = "\n".join(
+                [f"{m.role}: {m.content}" for m in trimmed]
             )
 
-            try:
-                lead_json = json.loads(extract_content)
+            extract_payload = {
+                "model": model,
+                "temperature": 0,
+                "max_tokens": 300,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": LEAD_EXTRACT_PROMPT
+                    },
+                    {
+                        "role": "user",
+                        "content": conversation_text
+                    }
+                ]
+            }
 
-                if lead_json.get("is_lead"):
+            extract_res = await client.post(
+                CHAT_URL,
+                json=extract_payload,
+                headers={
+                    "Authorization": f"Bearer {API_KEY}"
+                }
+            )
 
-                    services_str = _normalise_services(
-                        lead_json.get("services")
+            if extract_res.is_success:
+
+                extract_data = extract_res.json()
+
+                extract_content = (
+                    extract_data.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                )
+
+                try:
+
+                    lead_json = json.loads(extract_content)
+
+                    if lead_json.get("is_lead"):
+
+                        services_str = _normalise_services(
+                            lead_json.get("services")
+                        )
+
+                        async with get_db() as db:
+                            async with db.cursor() as cur:
+
+                                await cur.execute(
+                                    """
+                                    INSERT INTO leads
+                                    (
+                                        name,
+                                        email,
+                                        phone,
+                                        company,
+                                        industry,
+                                        requirements,
+                                        services,
+                                        budget_range,
+                                        timeline,
+                                        source,
+                                        transcript
+                                    )
+                                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                    """,
+                                    (
+                                        lead_json.get("name"),
+                                        lead_json.get("email"),
+                                        lead_json.get("phone"),
+                                        lead_json.get("company"),
+                                        lead_json.get("industry"),
+                                        lead_json.get("requirements"),
+                                        services_str,
+                                        lead_json.get("budget_range"),
+                                        lead_json.get("timeline"),
+                                        "chatbot",
+                                        json.dumps([
+                                            {
+                                                "role": m.role,
+                                                "content": m.content
+                                            }
+                                            for m in trimmed
+                                        ])
+                                    )
+                                )
+
+                                logger.info(
+                                    f"✅ Lead auto-saved: "
+                                    f"{lead_json.get('name')}"
+                                )
+                                asyncio.create_task(
+                                    send_lead_notification(lead_json)
+                                )
+
+                                asyncio.create_task(
+                                    send_client_confirmation(lead_json)
+                                )
+
+                except Exception as parse_exc:
+                    logger.error(
+                        f"Lead parsing failed: {parse_exc}"
                     )
 
-                    async with get_db() as db:
-                        async with db.cursor() as cur:
+        except Exception as lead_exc:
+            logger.error(
+                f"Lead extraction failed: {lead_exc}"
+            )
 
-                            await cur.execute(
-                                """
-                                INSERT INTO leads
-                                (
-                                    name,
-                                    email,
-                                    phone,
-                                    company,
-                                    industry,
-                                    requirements,
-                                    services,
-                                    budget_range,
-                                    timeline,
-                                    source,
-                                    transcript
-                                )
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                                """,
-                                (
-                                    lead_json.get("name"),
-                                    lead_json.get("email"),
-                                    lead_json.get("phone"),
-                                    lead_json.get("company"),
-                                    lead_json.get("industry"),
-                                    lead_json.get("requirements"),
-                                    services_str,
-                                    lead_json.get("budget_range"),
-                                    lead_json.get("timeline"),
-                                    "chatbot",
-                                    json.dumps([
-                                        {
-                                            "role": m.role,
-                                            "content": m.content
-                                        }
-                                        for m in trimmed
-                                    ])
-                                )
-                            )
-
-                            logger.info(
-                                f"✅ Lead auto-saved: "
-                                f"{lead_json.get('name')}"
-                            )
-
-            except Exception as parse_exc:
-                logger.error(f"Lead parsing failed: {parse_exc}")
-
-    except Exception as lead_exc:
-        logger.error(f"Lead extraction failed: {lead_exc}")
-    return {
-        "content": content,
-        "model": data.get("model", model)
-    }
-
+        return {
+            "content": content,
+            "model": data.get("model", model)
+        }
 # ============================================================
 # CREATE BOOKING
 # ============================================================
@@ -627,6 +646,7 @@ async def create_lead(lead: LeadCreate):
     new_lead = _row_to_dict(row) if row else {"id": new_id}
 
     asyncio.create_task(send_lead_notification(new_lead))
+    asyncio.create_task(send_client_confirmation(new_lead))
 
     return {
         "ok": True,
